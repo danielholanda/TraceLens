@@ -1,0 +1,228 @@
+###############################################################################
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+###############################################################################
+
+# Grade the analysis-orchestrator skill with skillscope, from the dataset that
+# ships beside it at
+# TraceLens/Agent/Analysis/skills/analysis-orchestrator/evals/evals.json:
+#
+#   * routing  -- installs the skill, asks whether its description fires for the
+#     prompts it should and stays quiet for the ones it should not. Cheap: each
+#     case is killed as soon as the decision is observable, and the harness
+#     supplies unrelated negatives on top of the dataset's own.
+#   * behavior -- runs a prompt to completion and grades the workspace and
+#     transcript it left behind. Here that is the standalone repeatability case,
+#     which downloads a trace, installs TraceLens, and writes analysis.md.
+#
+# Until now these prompts were only graded in amd/skills, against whatever
+# commit of this repo it had vendored. Running them here grades the change under
+# review instead.
+#
+# skillscope also publishes a reusable pipeline that would collapse this file
+# into a single job:
+#
+#   jobs:
+#     skill-evals:
+#       uses: danielholanda/skillscope/.github/workflows/skill-evals.yml@main
+#       secrets: inherit
+#       with:
+#         skill_globs: TraceLens/Agent/Analysis/skills/*
+#         routing_skills: analysis-orchestrator
+#         infra_paths: .github/workflows/skill-evals.yml
+#
+# Two things in skillscope have to land before that works: its steps reference
+# `amd/skillscope@bootstrap`, which is not a repository yet, and the behavior
+# matrix it plans appends the platform to the runner labels
+# (`["ubuntu-latest", "Linux"]`), which no GitHub-hosted runner matches. Calling
+# the action directly is the documented alternative and needs neither, and with
+# one skill in this repo there is no matrix to lose.
+
+name: skill-evals
+
+on:
+  pull_request:
+    paths:
+      # The skill's description and prompts decide routing, its body decides
+      # behavior. Nothing else here pays for a run.
+      - "TraceLens/Agent/Analysis/skills/analysis-orchestrator/**"
+      - ".github/workflows/skill-evals.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which grader to run."
+        type: choice
+        options: [both, routing, behavior]
+        default: both
+      only:
+        description: "Comma-separated case ids to run (routing only)."
+        type: string
+        default: ""
+      min_accuracy:
+        description: "Fail the routing run below this accuracy (0-1). 0 reports without gating."
+        type: string
+        default: "0"
+
+concurrency:
+  group: skill-evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Secret-free and instant, so a malformed dataset fails here rather than
+  # halfway through a paid run.
+  validate:
+    name: Validate the eval dataset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate every eval dataset
+        uses: danielholanda/skillscope@main
+        with:
+          command: validate
+          skills: TraceLens/Agent/Analysis/skills/*
+
+  # A routing decision is made from skill descriptions alone: no trace, no
+  # TraceLens install, no particular hardware.
+  routing:
+    name: Routing
+    needs: validate
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'behavior'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # Passed to the agent the harness drives. A gateway instead of the
+      # provider default also wants ANTHROPIC_BASE_URL and, if it takes the key
+      # in a header, ANTHROPIC_CUSTOM_HEADERS.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Verify the Anthropic key is available
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY resolved to an empty value. GitHub withholds" >&2
+            echo "secrets from pull requests opened from forks; re-run this from a" >&2
+            echo "branch in this repository, or check that the secret is set." >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Reports the score rather than gating on it: pass min_accuracy on a
+      # dispatch to make it a hard bar. It still fails when no case produced a
+      # decision at all, which is an infrastructure problem rather than a score.
+      - name: Run the routing eval
+        uses: danielholanda/skillscope@main
+        with:
+          command: run
+          args: >-
+            --mode routing
+            --routing-skills analysis-orchestrator
+            --min-accuracy '${{ inputs.min_accuracy || '0' }}'
+            ${{ inputs.only && format('--only ''{0}''', inputs.only) || '' }}
+            --output routing-report.json
+            --keep-logs routing-logs
+          skills: TraceLens/Agent/Analysis/skills/*
+          install-claude: "true"
+
+      - name: Upload routing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: routing-report
+          path: |
+            routing-report.json
+            routing-logs/
+          if-no-files-found: warn
+
+  # The behavior case installs TraceLens and runs the whole analysis workflow on
+  # a real trace, so it is far longer than a routing case and its report is
+  # worth keeping whether it passed or not.
+  behavior:
+    name: Behavior (analysis-orchestrator)
+    needs: validate
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'routing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Verify the Anthropic key is available
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY resolved to an empty value. GitHub withholds" >&2
+            echo "secrets from pull requests opened from forks; re-run this from a" >&2
+            echo "branch in this repository, or check that the secret is set." >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run behavior cases for analysis-orchestrator
+        uses: danielholanda/skillscope@main
+        with:
+          command: run
+          args: >-
+            --mode behavior
+            --skill analysis-orchestrator
+            --output behavior-report.json
+            --keep-logs behavior-logs
+          skill: analysis-orchestrator
+          skills: TraceLens/Agent/Analysis/skills/*
+          install-claude: "true"
+
+      - name: Upload behavior report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-report
+          path: |
+            behavior-report.json
+            behavior-logs/
+          if-no-files-found: warn
+
+  # Single aggregate result, so branch protection can require one check. A leg
+  # a dispatch deliberately narrowed away reports `skipped` and does not fail.
+  skill-evals:
+    name: skill-evals
+    needs: [validate, routing, behavior]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      VALIDATE: ${{ needs.validate.result }}
+      ROUTING: ${{ needs.routing.result }}
+      BEHAVIOR: ${{ needs.behavior.result }}
+    steps:
+      - name: Verify eval results
+        run: |
+          echo "validate: $VALIDATE"
+          echo "routing:  $ROUTING"
+          echo "behavior: $BEHAVIOR"
+
+          # Dataset validation lives in that job, so a malformed evals.json
+          # lands here as a clear failure rather than a confusing one.
+          if [ "$VALIDATE" != "success" ]; then
+            echo "The validate job did not succeed ($VALIDATE)." >&2
+            exit 1
+          fi
+
+          failed=0
+          case "$ROUTING" in
+            success|skipped) ;;
+            *) echo "Routing did not pass ($ROUTING)." >&2; failed=1 ;;
+          esac
+          case "$BEHAVIOR" in
+            success|skipped) ;;
+            *) echo "Behavior cases did not pass ($BEHAVIOR)." >&2; failed=1 ;;
+          esac
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+
+          echo "Every eval that ran passed."

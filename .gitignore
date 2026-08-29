@@ -120,3 +120,6 @@ cmake-build-*/
 *.dll
 *.dylib
 .claude/settings.json
+
+# skillscope writes eval reports into the repo it is grading
+.skillscope/
