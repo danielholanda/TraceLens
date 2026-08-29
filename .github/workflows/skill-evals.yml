@@ -20,9 +20,6 @@ on:
 permissions:
   contents: read
 
-env:
-  SKILL_GLOBS: TraceLens/Agent/Analysis/skills/*
-
 jobs:
   structural:
     runs-on: ubuntu-latest
@@ -31,7 +28,7 @@ jobs:
       - uses: danielholanda/skillscope@main
         with:
           command: structural
-          skills: ${{ env.SKILL_GLOBS }}
+          skills: TraceLens/Agent/Analysis/skills/*
 
   routing:
     needs: structural
@@ -44,11 +41,8 @@ jobs:
       - uses: danielholanda/skillscope@main
         with:
           command: run
-          # `all` installs every skill that ships a dataset side by side. This
-          # repo has one, so it is graded against its own near misses and the
-          # negatives skillscope ships rather than against a neighbour.
-          args: --mode routing --routing-skills all
-          skills: ${{ env.SKILL_GLOBS }}
+          args: --mode routing --routing-skills analysis-orchestrator
+          skills: TraceLens/Agent/Analysis/skills/*
           install-claude: "true"
 
   behavior:
@@ -62,6 +56,6 @@ jobs:
       - uses: danielholanda/skillscope@main
         with:
           command: run
-          args: --mode behavior
-          skills: ${{ env.SKILL_GLOBS }}
+          args: --mode behavior --skill analysis-orchestrator
+          skills: TraceLens/Agent/Analysis/skills/*
           install-claude: "true"
