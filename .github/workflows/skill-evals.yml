@@ -1,0 +1,67 @@
+###############################################################################
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+###############################################################################
+
+# Grades this repo's skills with https://github.com/danielholanda/skillscope:
+# structure (free), then routing (which skill fires) and behavior (what the
+# agent did once it fired).
+
+name: skill-evals
+
+on:
+  pull_request:
+    paths:
+      - "TraceLens/Agent/Analysis/skills/**"
+      - ".github/workflows/skill-evals.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SKILL_GLOBS: TraceLens/Agent/Analysis/skills/*
+
+jobs:
+  structural:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: danielholanda/skillscope@main
+        with:
+          command: structural
+          skills: ${{ env.SKILL_GLOBS }}
+
+  routing:
+    needs: structural
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: danielholanda/skillscope@main
+        with:
+          command: run
+          # `all` installs every skill that ships a dataset side by side. This
+          # repo has one, so it is graded against its own near misses and the
+          # negatives skillscope ships rather than against a neighbour.
+          args: --mode routing --routing-skills all
+          skills: ${{ env.SKILL_GLOBS }}
+          install-claude: "true"
+
+  behavior:
+    needs: structural
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: danielholanda/skillscope@main
+        with:
+          command: run
+          args: --mode behavior
+          skills: ${{ env.SKILL_GLOBS }}
+          install-claude: "true"
