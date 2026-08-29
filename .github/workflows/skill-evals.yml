@@ -28,7 +28,7 @@ jobs:
       - uses: danielholanda/skillscope@main
         with:
           command: structural
-          skills: TraceLens/Agent/Analysis/skills/*
+          skills: TraceLens/Agent/Analysis/skills/analysis-orchestrator
 
   routing:
     needs: structural
@@ -42,7 +42,7 @@ jobs:
         with:
           command: run
           args: --mode routing --routing-skills analysis-orchestrator
-          skills: TraceLens/Agent/Analysis/skills/*
+          skills: TraceLens/Agent/Analysis/skills/analysis-orchestrator
           install-claude: "true"
 
   behavior:
@@ -56,6 +56,6 @@ jobs:
       - uses: danielholanda/skillscope@main
         with:
           command: run
-          args: --mode behavior --skill analysis-orchestrator
-          skills: TraceLens/Agent/Analysis/skills/*
+          args: --mode behavior
+          skills: TraceLens/Agent/Analysis/skills/analysis-orchestrator
           install-claude: "true"
