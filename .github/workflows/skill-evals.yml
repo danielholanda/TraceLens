@@ -17,25 +17,16 @@ on:
     inputs:
       structural:
         description: Structural evals
-        type: choice
-        options:
-          - required
-          - off
-        default: required
+        type: boolean
+        default: true
       routing:
         description: Routing evals
-        type: choice
-        options:
-          - required
-          - off
-        default: off
+        type: boolean
+        default: false
       behavioral:
         description: Behavioral evals
-        type: choice
-        options:
-          - required
-          - off
-        default: off
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,6 +40,6 @@ jobs:
     with:
       skills: TraceLens/Agent/Analysis/skills/analysis-orchestrator
       # Each step can be set to `required`, `optional`, or `off`.
-      structural: ${{ github.event.inputs.structural || 'required' }}
-      routing: ${{ github.event.inputs.routing || 'off' }}
-      behavioral: ${{ github.event.inputs.behavioral || 'off' }}
+      structural: ${{ github.event_name != 'workflow_dispatch' && 'required' || inputs.structural && 'required' || 'off' }}
+      routing: ${{ github.event_name == 'workflow_dispatch' && inputs.routing && 'required' || 'off' }}
+      behavioral: ${{ github.event_name == 'workflow_dispatch' && inputs.behavioral && 'required' || 'off' }}
